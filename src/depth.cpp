@@ -6,8 +6,21 @@
 #include <cmath>
 #include <vector>
 #include <limits>
+#include <stdexcept>
+
+#ifdef EINSTAR_WITH_CUDA
+#include "depth_gpu.hpp"
+#endif
 
 namespace einstar {
+
+bool gpu_matching_available() {
+#ifdef EINSTAR_WITH_CUDA
+  return true;
+#else
+  return false;
+#endif
+}
 
 cv::Mat camera_matrix(const CameraIntrinsics& in) {
   return cv::Mat(cv::Matx33d(in.fx, 0, in.cx, 0, in.fy, in.cy, 0, 0, 1));
@@ -85,6 +98,13 @@ cv::Mat match(const cv::Mat& l, const cv::Mat& r, int min_disp, int num_disp, co
 
 StereoDepth::StereoDepth(const CameraModel& model, cv::Size size, DepthParams params)
     : size_(size), params_(params) {
+  if (params.gpu) {
+#ifdef EINSTAR_WITH_CUDA
+    gpu_ = std::make_shared<detail::GpuMatcher>();
+#else
+    throw std::invalid_argument("DepthParams::gpu needs a build with EINSTAR_WITH_CUDA");
+#endif
+  }
   // Pick the geometric left IR camera: OpenCV's horizontal rectification
   // expects the second camera at negative x in the first camera's frame.
   const bool swap = model.relative(kIrLeftCamera, kIrRightCamera).T[0] > 0;
@@ -178,7 +198,12 @@ cv::Mat StereoDepth::disparity(const cv::Mat& lr, const cv::Mat& rr) const {
     // so the search runs over u - k*ur = (1 - k)*u + k*d for d in the window.
     const int min_k = floor16(std::min(0.0, (1 - k) * last_u) + k * min_disp_);
     const int max_k = static_cast<int>(std::ceil(std::max(0.0, (1 - k) * last_u) + k * (min_disp_ + num_disp_)));
-    const cv::Mat dk = match(le, rk, min_k, std::max(16, ceil16(max_k - min_k)), params_);
+    const int num_k = std::max(16, ceil16(max_k - min_k));
+#ifdef EINSTAR_WITH_CUDA
+    const cv::Mat dk = gpu_ ? gpu_->match(le, rk, min_k, num_k, params_) : match(le, rk, min_k, num_k, params_);
+#else
+    const cv::Mat dk = match(le, rk, min_k, num_k, params_);
+#endif
     // Keep a match only where earlier stretches found nothing, both pixels
     // sample inside their source images, and the depth is in range.
     for (int v = 0; v < d.rows; ++v) {

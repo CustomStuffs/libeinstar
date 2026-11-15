@@ -4,9 +4,10 @@
 //   einstar-rgbd OUT_DIR --calib FILE --replay FRAME_DIR     einstar-probe / EINSTAR_RECORD_DIR captures
 //
 // Depth options (defaults as in DepthParams): --min-depth-mm N, --max-depth-mm N,
-// --scale S and --single-pass (match only at stretch 1). Matching dominates the
-// cost and grows with the depth window; on a memory-bound desktop (i7-4790K)
-// 160-500 mm at scale 0.4 ran ~5x faster than the defaults.
+// --scale S, --single-pass (match only at stretch 1) and --gpu (match on a
+// CUDA GPU with libSGM; needs a build with EINSTAR_WITH_CUDA). Matching
+// dominates the cost and grows with the depth window; on a memory-bound
+// desktop (i7-4790K) 160-500 mm at scale 0.4 ran ~5x faster than the defaults.
 //
 // Each frame set becomes OUT_DIR/c_NNNNN.png (colour, BGR) and
 // OUT_DIR/d_NNNNN.png (depth, uint16 in 0.1 mm, 0 = none), both at half
@@ -215,6 +216,7 @@ int main(int argc, char** argv) {
     else if (a == "--max-depth-mm" && i + 1 < argc) params.max_depth_mm = std::strtof(argv[++i], nullptr);
     else if (a == "--scale" && i + 1 < argc) params.scale = std::strtod(argv[++i], nullptr);
     else if (a == "--single-pass") params.stretches = {1.0};
+    else if (a == "--gpu") params.gpu = true;
     else if (out.empty() && a[0] != '-') out = a;
     else {
       std::fprintf(stderr, "unknown argument: %s\n", a.c_str());
@@ -224,13 +226,17 @@ int main(int argc, char** argv) {
   if (out.empty() || (!replay_dir.empty() && calib_path.empty())) {
     std::fprintf(stderr,
                  "usage: %s OUT_DIR [--calib FILE] [--seconds N] | OUT_DIR --calib FILE --replay FRAME_DIR\n"
-                 "       depth: [--min-depth-mm N] [--max-depth-mm N] [--scale S] [--single-pass]\n",
+                 "       depth: [--min-depth-mm N] [--max-depth-mm N] [--scale S] [--single-pass] [--gpu]\n",
                  argv[0]);
     return 2;
   }
   if (!(params.min_depth_mm > 0 && params.max_depth_mm > params.min_depth_mm && params.scale > 0 &&
         params.scale <= 1)) {
     std::fprintf(stderr, "need 0 < --min-depth-mm < --max-depth-mm and 0 < --scale <= 1\n");
+    return 2;
+  }
+  if (params.gpu && !gpu_matching_available()) {
+    std::fprintf(stderr, "--gpu: this build has no GPU matching (configure with -DEINSTAR_WITH_CUDA=ON)\n");
     return 2;
   }
   std::signal(SIGINT, [](int) { g_stop = true; });
