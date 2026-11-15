@@ -46,6 +46,10 @@ set(EINSTAR_HAS_DEPTH OFF)
 
 if(EINSTAR_WITH_OPENCV)
   find_package(OpenCV QUIET COMPONENTS core imgproc calib3d)
+  if(NOT OpenCV_FOUND)
+    # OpenCV 5 split calib3d into calib, stereo and geometry
+    find_package(OpenCV 5 QUIET COMPONENTS core imgproc calib stereo geometry)
+  endif()
   if(OpenCV_FOUND)
     add_library(einstar_depth STATIC src/depth.cpp)
     target_link_libraries(einstar_depth PUBLIC einstar_core ${OpenCV_LIBS})
